@@ -80,8 +80,7 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == 45 && i + 1 < argc) {
             args[argv[i]] = atof(argv[i + 1]);
-            if ((strcmp(argv[i], "--brightness") || strcmp(argv[i], "--gamma")) &&
-                args[argv[i]] < 0.1)
+            if (args[argv[i]] < 0.1 && (!!strcmp(argv[i], "--brightness") || !!strcmp(argv[i], "--gamma")))
                 args[argv[i]] = 0.1;
             i++;
         }
