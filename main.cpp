@@ -1,12 +1,28 @@
 #include "main.hpp"
 
+extern char **environ;
+
+void reload_hyprland_fast() {
+    pid_t pid;
+    posix_spawn_file_actions_t file_actions;
+    posix_spawn_file_actions_init(&file_actions);
+    posix_spawn_file_actions_addopen(&file_actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addopen(&file_actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+
+    // hyprctl keyword decoration:screen_shader ~/.config/hypr/screen_controller_shader.frag
+    const char *argv[] = {"hyprctl", "keyword", "decoration:screen_shader", SHADER_PATH.c_str(), nullptr};
+
+    posix_spawn(&pid, "/usr/bin/hyprctl", &file_actions, nullptr,
+                (char *const *)argv, environ);
+
+    posix_spawn_file_actions_destroy(&file_actions);
+}
+
 void save_config(map<string, double> args) {
-    string config(BASE_CONFIG);
-    config = set_args(config, args);
     ofstream file(CONFIG_PATH);
     if (!file.is_open())
         throw runtime_error("Failed to open file: " + CONFIG_PATH);
-    file << config.c_str();
+    file << set_args_f(BASE_CONFIG_F, args).c_str();
 }
 
 map<string, double> get_config() {
@@ -40,41 +56,29 @@ void print_args(map<string, double> args) {
     }
 }
 
-string set_args(string base_shader, map<string, double> args) {
-    string new_shader(base_shader);
-    new_shader = my_replace(new_shader, "TEMPERATURE", fmtFract(args["--temperature"]));
-    new_shader = my_replace(new_shader, "BRIGHTNESS", fmtFract(args["--brightness"]));
-    new_shader = my_replace(new_shader, "CONTRAST", fmtFract(args["--contrast"]));
-    new_shader = my_replace(new_shader, "HUE", fmtFract(args["--hue"]));
-    new_shader = my_replace(new_shader, "SATURATION", fmtFract(args["--saturation"]));
-    new_shader = my_replace(new_shader, "GAMMA", fmtFract(args["--gamma"]));
-    new_shader = my_replace(new_shader, "RED", fmtFract(args["--red"]));
-    new_shader = my_replace(new_shader, "GREEN", fmtFract(args["--green"]));
-    new_shader = my_replace(new_shader, "BLUE", fmtFract(args["--blue"]));
-    return new_shader;
+string set_args_f(string str, map<string, double> args) {
+    return string_format(str, args["--red"], args["--green"], args["--blue"],
+                         args["--temperature"], args["--brightness"], args["--contrast"],
+                         args["--hue"], args["--saturation"], args["--gamma"]);
 }
 
-void save_shader(string new_shader) {
+void save_shader(map<string, double> args) {
     ofstream file(SHADER_PATH);
     if (!file.is_open())
         throw runtime_error("Failed to open file: " + SHADER_PATH);
-    file << new_shader.c_str();
+    file << set_args_f(BASE_SHADER_F, args).c_str();
 }
-
-void reload_hyprland() { system("hyprctl reload"); }
 
 int main(int argc, char **argv) {
     map<string, double> args = get_args();
 
     if (argc == 1) {
         print_args(args);
-        save_shader(set_args(BASE_SHADER, args));
-        reload_hyprland();
-        return 0;
+        goto hopa;
     }
 
-    if (argc == 2 && (strcmp(argv[1], "--help") || strcmp(argv[1], "help") ||
-                      strcmp(argv[1], "-h")))
+    if (argc == 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "help") == 0 ||
+                      strcmp(argv[1], "-h") == 0))
         return puts(HELP.c_str());
 
     for (int i = 1; i < argc; i++) {
@@ -86,8 +90,9 @@ int main(int argc, char **argv) {
         }
     };
 
-    save_shader(set_args(BASE_SHADER, args));
     save_config(args);
-    reload_hyprland();
+hopa:
+    save_shader(args);
+    reload_hyprland_fast();
     return 0;
 }

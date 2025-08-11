@@ -4,21 +4,39 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <ostream>
+#include <spawn.h>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
-
 using namespace std;
 
 inline string HOME(getenv("HOME"));
 inline string SHADER_PATH = HOME + "/.config/hypr/screen_controller_shader.frag";
 inline string CONFIG_PATH = HOME + "/.config/hypr/screen_controller_shader.conf";
+
+template <typename... Args>
+std::string string_format(const std::string &format, Args... args) {
+    int size_s = std::snprintf(nullptr, 0, format.c_str(), args...) + 1; // Extra space for '\0'
+    if (size_s <= 0) {
+        throw std::runtime_error("Error during formatting.");
+    }
+    auto size = static_cast<size_t>(size_s);
+    std::unique_ptr<char[]> buf(new char[size]);
+    std::snprintf(buf.get(), size, format.c_str(), args...);
+    return std::string(buf.get(), buf.get() + size - 1); // We don't want the '\0' inside
+}
 
 inline void ltrim(string &s) {
     s.erase(s.begin(), find_if(s.begin(), s.end(), [](unsigned char ch) {
@@ -77,6 +95,7 @@ inline vector<string> split_string(string str,
 }
 
 void print_args(map<string, double> args);
+string set_args_f(string str, map<string, double> args);
 string set_args(string base_shader, map<string, double> args);
 
 // 1 - 5 numbers of fact
@@ -89,7 +108,7 @@ inline string fmtFract(double value) {
     return s;
 }
 
-inline map<string, double> DEFAULT_ARGS{
+const map<string, double> DEFAULT_ARGS{
     {"--temperature", 6500},
     {"--brightness", 1.0},
     {"--contrast", 1.0},
@@ -101,24 +120,24 @@ inline map<string, double> DEFAULT_ARGS{
     {"--blue", 1.0},
 };
 
-inline string BASE_CONFIG = R"(temperature = TEMPERATURE
-brightness = BRIGHTNESS
-contrast = CONTRAST
-hue = HUE
-saturation = SATURATION
-gamma = GAMMA
-red = RED
-green = GREEN
-blue = BLUE
+const string BASE_CONFIG_F = R"(red = %.5f
+green = %.5f
+blue = %.5f
+temperature = %.5f
+brightness = %.5f
+contrast = %.5f
+hue = %.5f
+saturation = %.5f
+gamma = %.5f
 )";
 
-inline string BASE_SHADER = R"(#version 330 core
+const string BASE_SHADER_F = R"(#version 330 core
 
 precision mediump float;
-varying vec2 v_texcoord;
+in vec2 v_texcoord;
 uniform sampler2D tex;
 
-vec3 new_color = vec3(RED, GREEN, BLUE);
+vec3 new_color = vec3(%.5f, %.5f, %.5f);
 
 vec3 temperatureToRGB(float temp) {
     temp = clamp(temp, 1000.0, 40000.0) / 100.0;
@@ -156,21 +175,21 @@ vec3 hsv2rgb(vec3 c) {
 void main() {
     vec4 pixColor = texture2D(tex, v_texcoord);
     vec3 color = pixColor.rgb;
-    color *= temperatureToRGB(TEMPERATURE);
-    color *= BRIGHTNESS;
-    color = mix(vec3(dot(vec3(1.0/3.0), color)), color, CONTRAST);
+    color *= temperatureToRGB(%.5f);
+    color *= %.5f;
+    color = mix(vec3(dot(vec3(1.0/3.0), color)), color, %.5f);
     vec3 hsv = rgb2hsv(color);
-    hsv.x = fract(hsv.x + HUE);
-    hsv.y *= SATURATION;
+    hsv.x = fract(hsv.x + %.5f);
+    hsv.y *= %.5f;
     color = hsv2rgb(hsv);
-    color = pow(color, vec3(1.0 / GAMMA));
+    color = pow(color, vec3(1.0 / %.5f));
     color *= new_color;
     color = clamp(color, 0.0, 1.0);
     gl_FragColor = vec4(color, pixColor.a);
 }
 )";
 
-inline string HELP = R"(
+const string HELP = R"(
 Arguments & range
 --temperatue 6700.0   ~ 1000-40000
 --brightness 1.0      ~ 0.1-2.0
